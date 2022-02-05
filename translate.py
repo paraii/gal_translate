@@ -3,52 +3,55 @@ __author__ = "paraii"
 from configparser import ConfigParser
 from hashlib import md5
 from io import BytesIO
-from multiprocessing import Process, Queue, freeze_support
+from multiprocessing import Process, Queue, freeze_support, set_start_method
 from os import path
 from random import randint
 from sys import argv
-from threading import Thread
+from threading import Thread, Event
 from time import sleep
 from tkinter import Canvas, Tk
 from aip import AipOcr
 from PIL import ImageGrab
 from PyHook3 import HookManager
-from pythoncom import PumpMessages
+from pythoncom import PumpWaitingMessages
 from requests import post
-
 from screenshoot import ScreenShoot
 
-MATH_PATH = path.dirname(path.realpath(argv[0]))
-debug = True
 
-config = ConfigParser()
-config.read(MATH_PATH + r"\config.ini", encoding="utf-8-sig")
+class Config:
+    MATH_PATH = path.dirname(path.realpath(argv[0]))
+    debug = True
 
-####################参数####################
-FONT = config.get("Other", "font")
-FONTCOLOR = config.get("Other", "font_color")
-show_text_dely = float(config.get("Other", "show_text_dely"))
-select_area_key = config.get("Other", "select_area_key")
-translate_key = config.get("Other", "translate_key")
-##百度智能云 文字识别##
-APP_ID = config.get("BaiduOCR", "appid")
-API_KEY = config.get("BaiduOCR", "appkey")
-SECRET_KEY = config.get("BaiduOCR", "secretkey")
-client = AipOcr(APP_ID, API_KEY, SECRET_KEY)
+    config = ConfigParser()
+    config.read(MATH_PATH + r"\config.ini", encoding="utf-8-sig")
 
-##百度翻译开放平台##
-appid = config.get("BaiduTranslate", "appid")
-appkey = config.get("BaiduTranslate", "appkey")
-# For list of language codes, please refer to `https://api.fanyi.baidu.com/doc/21`
-from_lang = config.get("BaiduTranslate", "from_lang")
-to_lang = config.get("BaiduTranslate", "to_lang")
-trans_url = "https://api.fanyi.baidu.com/api/trans/vip/translate"
-####################参数####################
+    ####################参数####################
+    FONT = config.get("Other", "font")
+    FONTCOLOR = config.get("Other", "font_color")
+    show_text_dely = float(config.get("Other", "show_text_dely"))
+    select_area_key = config.get("Other", "select_area_key")
+    translate_key = config.get("Other", "translate_key")
+    ##百度智能云 文字识别##
+    APP_ID = config.get("BaiduOCR", "appid")
+    API_KEY = config.get("BaiduOCR", "appkey")
+    SECRET_KEY = config.get("BaiduOCR", "secretkey")
+    client = AipOcr(APP_ID, API_KEY, SECRET_KEY)
+
+    ##百度翻译开放平台##
+    appid = config.get("BaiduTranslate", "appid")
+    appkey = config.get("BaiduTranslate", "appkey")
+    # For list of language codes, please refer to `https://api.fanyi.baidu.com/doc/21`
+    from_lang = config.get("BaiduTranslate", "from_lang")
+    to_lang = config.get("BaiduTranslate", "to_lang")
+    trans_url = "https://api.fanyi.baidu.com/api/trans/vip/translate"
+    ####################参数####################
+    def __init__(self):
+        pass
 
 
 def cal_bgcolor():
     bgcolor = "white"
-    fontcolor = int(FONTCOLOR[1:], 16)
+    fontcolor = int(Config.FONTCOLOR[1:], 16)
     if (fontcolor + 1) & 0x0000FF == 0x0:
         bgcolor = fontcolor - 1
     else:
@@ -58,7 +61,7 @@ def cal_bgcolor():
 
 
 def debug_print(s, *args):
-    if debug:
+    if Config.debug:
         print(s, *args)
 
 
@@ -74,7 +77,7 @@ class TranslateImage:
         options = {}
         options["language_type"] = "JAP"
         if self.accurate:
-            res = client.basicAccurate(img_bytes.getvalue(), options)
+            res = Config.client.basicAccurate(img_bytes.getvalue(), options)
             if "error_code" in res and res["error_code"] == 18:
                 return False
             elif "error_code" in res and res["error_code"] == 17:
@@ -83,7 +86,7 @@ class TranslateImage:
                 res = res["words_result"]
                 debug_print("OCR高精度")
         if not self.accurate:
-            res = client.basicGeneral(img_bytes.getvalue(), options)
+            res = Config.client.basicGeneral(img_bytes.getvalue(), options)
             if "error_code" in res and res["error_code"] == 18:
                 return False
             elif "error_code" in res and res["error_code"] == 17:
@@ -102,19 +105,21 @@ class TranslateImage:
 
     def baidu_api_translate(self, query):
         salt = randint(32768, 65536)
-        sign = md5((appid + query + str(salt) + appkey).encode("utf-8")).hexdigest()
+        sign = md5(
+            (Config.appid + query + str(salt) + Config.appkey).encode("utf-8")
+        ).hexdigest()
         # Build request
         payload = {
-            "appid": appid,
+            "appid": Config.appid,
             "q": query,
-            "from": from_lang,
-            "to": to_lang,
+            "from": Config.from_lang,
+            "to": Config.to_lang,
             "salt": salt,
             "sign": sign,
         }
         # Send request
         r = post(
-            trans_url,
+            Config.trans_url,
             params=payload,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
@@ -153,12 +158,14 @@ class TranslateImage:
         return ImageGrab.grab(self.box_area)
 
 
-class HotKey(Process):  # 键盘热键监听
+class HotKey(Thread):  # 键盘热键监听
     def __init__(self, que):
         super().__init__()
         self.que = que
         self.keylist = []
         self.ss = None
+        self._running = True
+        self._event = Event()
 
     def grab(self):
         self.ss = ScreenShoot()
@@ -167,6 +174,9 @@ class HotKey(Process):  # 键盘热键监听
 
     def translate(self):
         self.que.put("translate")
+
+    def terminate(self):
+        self._running = False
 
     def OnKeyboardEvent(self, event):
         # print('MessageName:', event.MessageName)  # 同上，共同属性不再赘述
@@ -185,12 +195,12 @@ class HotKey(Process):  # 键盘热键监听
         # print('Transition', event.Transition)  # 判断转换状态
         # print('---')
 
-        if event.Key == select_area_key:
+        if event.Key == Config.select_area_key:
             self.grab()
-        elif event.Key == translate_key:
+        elif event.Key == Config.translate_key:
             self.translate()
         elif event.Key == "Return":
-            sleep(show_text_dely)
+            self._event.wait(Config.show_text_dely)
             self.translate()
         else:
             self.keylist.append(event.Key)
@@ -204,7 +214,7 @@ class HotKey(Process):  # 键盘热键监听
                 and self.keylist[1] == "Lmenu"
                 and self.keylist[2] == "Z"
             ):
-                Thread(target=self.translate).start()
+                self.translate()
             self.keylist.clear()
         return True
 
@@ -212,7 +222,10 @@ class HotKey(Process):  # 键盘热键监听
         hm = HookManager()
         hm.KeyDown = self.OnKeyboardEvent
         hm.HookKeyboard()
-        PumpMessages()
+
+        while self._running:
+            PumpWaitingMessages()
+            self._event.wait(0.1)
 
 
 class ResizingCanvas(Canvas):  # 大小随窗口缩放的Canvas
@@ -406,6 +419,7 @@ class PickMsg(Thread):  # 消息循环
     def __init__(self, que, canvas, transimg):
         super().__init__()
         self._running = True
+        self._event = Event()
         self.que = que
         self.area = None
         self.canvas = canvas
@@ -426,7 +440,7 @@ class PickMsg(Thread):  # 消息循环
     def create_area(self):
         if self.area != None:
             self.area.terminate()
-        self.area = Areawin(self.que, self.transimg)
+        self.area = Areawin(self.que, self.transimg.box_area)
         self.area.start()
 
     def run(self):
@@ -450,39 +464,39 @@ class PickMsg(Thread):  # 消息循环
                     else:  # 接收翻译结果
                         self.canvas.itemconfig(self.canvas.text_id, text=msg)
                         # self.canvas.itemconfig(self.canvas.outline_id, text=msg)
-            sleep(0.2)
+            self._event.wait(0.1)
 
 
 class Areawin(Process):
-    def __init__(self, que, transimg):
+    def __init__(self, que, box):
         super().__init__()
         self.que = que
-        self.transimg = transimg
-        self.root = None
+        self.box = box
+        self.area_root = None
         self._running = True
 
     def run(self):
         bgcolor = cal_bgcolor()
 
-        self.root = Tk()
-        self.root.attributes("-transparentcolor", bgcolor)
-        self.root.attributes("-alpha", 0.3)
-        self.root.attributes("-topmost", 1)
-        x1 = int(self.transimg.box_area[0])
-        y1 = int(self.transimg.box_area[1])
-        x2 = int(self.transimg.box_area[2])
-        y2 = int(self.transimg.box_area[3])
-        self.root.geometry(f"{x2-x1}x{y2-y1}+{x1}+{y1}")
-        self.root.overrideredirect(True)
+        self.area_root = Tk()
+        self.area_root.attributes("-transparentcolor", bgcolor)
+        self.area_root.attributes("-alpha", 0.3)
+        self.area_root.attributes("-topmost", 1)
+        x1 = int(self.box[0])
+        y1 = int(self.box[1])
+        x2 = int(self.box[2])
+        y2 = int(self.box[3])
+        self.area_root.geometry(f"{x2-x1}x{y2-y1}+{x1}+{y1}")
+        self.area_root.overrideredirect(True)
         box_canvas = ResizingCanvas(
-            self.root,
+            self.area_root,
             que=self.que,
             width=x2 - x1,
             height=y2 - y1,
             bg=bgcolor,
         )
         box_canvas.pack()
-        self.root.mainloop()
+        self.area_root.mainloop()
 
 
 class Tkwin(Process):
@@ -500,7 +514,7 @@ class Tkwin(Process):
     def on_mouse_wheel(self, event):  # 鼠标滚轮事件
         Thread(target=self.change_rect_color).start()
         debug_print("on_mouse_wheel")
-        sleep(show_text_dely)
+        sleep(Config.show_text_dely)
         self.que.put("translate")
 
     def run(self):
@@ -526,7 +540,7 @@ class Tkwin(Process):
         self.canvas.text_id = self.canvas.create_text(
             (self.canvas.width / 2, self.canvas.height / 2),
             text="日->中",
-            font=FONT,
+            font=Config.FONT,
             fill="#FFFFFE",
             width=self.canvas.width,
         )
@@ -540,10 +554,9 @@ class Tkwin(Process):
 
 if __name__ == "__main__":
     freeze_support()  # Windows使用Pyinstaller对多进程打包必须 https://github.com/pyinstaller/pyinstaller/wiki/Recipe-Multiprocessing
-    debug_print("debug:", debug)
-
+    set_start_method("spawn")
+    debug_print("debug:", Config.debug)
     que = Queue()  # 通信队列
-
     p1 = Tkwin(que)  # GUI
     p1.start()
     p2 = HotKey(que)  # 键盘热键监听（功能入口）
