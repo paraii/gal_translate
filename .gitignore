@@ -9,6 +9,7 @@ dist/
 # Other files and folders
 .settings/
 config.ini
+translate.spec
 
 # Executables
 *.swf

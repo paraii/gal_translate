@@ -13,7 +13,7 @@ from tkinter import Canvas, Tk
 from aip import AipOcr
 from PIL import ImageGrab
 from PyHook3 import HookManager
-from pythoncom import PumpWaitingMessages
+from pythoncom import PumpMessages
 from requests import post
 from screenshoot import ScreenShoot
 
@@ -158,14 +158,12 @@ class TranslateImage:
         return ImageGrab.grab(self.box_area)
 
 
-class HotKey(Thread):  # 键盘热键监听
+class HotKey(Process):  # 键盘热键监听
     def __init__(self, que):
         super().__init__()
         self.que = que
         self.keylist = []
         self.ss = None
-        self._running = True
-        self._event = Event()
 
     def grab(self):
         self.ss = ScreenShoot()
@@ -174,9 +172,6 @@ class HotKey(Thread):  # 键盘热键监听
 
     def translate(self):
         self.que.put("translate")
-
-    def terminate(self):
-        self._running = False
 
     def OnKeyboardEvent(self, event):
         # print('MessageName:', event.MessageName)  # 同上，共同属性不再赘述
@@ -200,7 +195,6 @@ class HotKey(Thread):  # 键盘热键监听
         elif event.Key == Config.translate_key:
             self.translate()
         elif event.Key == "Return":
-            self._event.wait(Config.show_text_dely)
             self.translate()
         else:
             self.keylist.append(event.Key)
@@ -222,10 +216,7 @@ class HotKey(Thread):  # 键盘热键监听
         hm = HookManager()
         hm.KeyDown = self.OnKeyboardEvent
         hm.HookKeyboard()
-
-        while self._running:
-            PumpWaitingMessages()
-            self._event.wait(0.1)
+        PumpMessages()
 
 
 class ResizingCanvas(Canvas):  # 大小随窗口缩放的Canvas
@@ -499,7 +490,7 @@ class Areawin(Process):
         self.area_root.mainloop()
 
 
-class Tkwin(Process):
+class Tkwin(Thread):
     def __init__(self, que):
         super().__init__()
         self.que = que
