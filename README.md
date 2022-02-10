@@ -18,17 +18,22 @@ to_lang = zh
 [Other]
 font = 华康方圆体W7 16
 font_color = #DC143C
-
+; 是否使用本地OCR
+is_localOCR = 1
 ; 文字显示延迟
 show_text_dely = 0.7
 ; 区域选择键
 select_area_key = F2
 ; 除此设置之外回车键也是翻译键
-translate_key = F1
+translate_key = Z
 ```
 注册百度服务后在管理控制台创建应用可以得到密钥，复制到配置文件的对应位置即可：  
 百度OCR：https://cloud.baidu.com/product/ocr_general  
 百度翻译：https://api.fanyi.baidu.com  
+
+两者均可领取免费额度，其中百度翻译服务额度较多。  
+
+百度OCR免费额度较少，**配置文件中is_localOCR设为1可开启本地OCR**（0关闭）。本地OCR基于PaddleOCR的开源推断模型。  
 
 # 特性及操作说明：  
 - 极简窗体无鼠标遮挡  
