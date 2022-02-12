@@ -1,4 +1,5 @@
-baidu_aip==2.2.18.0
+numpy==1.14.5
+baidu-aip==2.2.18.0
 paddleocr==2.4
 Pillow==9.0.1
 PyHook3==1.6.1

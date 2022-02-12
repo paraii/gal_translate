@@ -5,6 +5,7 @@ bin-release/
 [Bb]in/
 main/build/
 main/dist/
+lib/
 
 # Other files and folders
 .settings/

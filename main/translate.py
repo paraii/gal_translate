@@ -1,17 +1,33 @@
 __author__ = "paraii"
+# import traceback
 
 from configparser import ConfigParser
 from hashlib import md5
 from io import BytesIO
 from multiprocessing import Process
+from operator import itemgetter
 from random import randint
 from threading import Thread, Event
 from time import sleep
-from tkinter import Canvas, Tk
+from tkinter import (
+    Canvas,
+    Label,
+    Tk,
+    Menu,
+    Toplevel,
+    Checkbutton,
+    colorchooser,
+    Button,
+    Entry,
+    font,
+    ttk,
+)
+from turtle import color
 from aip import AipOcr
 from PIL import ImageGrab
 from requests import post
-from screenshoot import ScreenShoot
+from gui_utils.screenshoot import ScreenShoot
+from gui_utils.link_label import LinkLabel
 
 
 class Config:
@@ -29,7 +45,7 @@ class Config:
     FONT = config.get("Other", "font")
     FONTCOLOR = config.get("Other", "font_color")
     is_local = config.get("Other", "is_localOCR")
-    show_text_dely = float(config.get("Other", "show_text_dely"))
+    show_text_dely = config.get("Other", "show_text_dely")
     select_area_key = config.get("Other", "select_area_key")
     translate_key = config.get("Other", "translate_key")
 
@@ -47,8 +63,93 @@ class Config:
     to_lang = config.get("BaiduTranslate", "to_lang")
     trans_url = "https://api.fanyi.baidu.com/api/trans/vip/translate"
     ####################参数####################
+
     def __init__(self):
         pass
+
+    @staticmethod
+    def read_config():
+        Config.config.read(Config.MATH_PATH + r"\config.ini", encoding="utf-8-sig")
+        ####################参数####################
+        Config.FONT = Config.config.get("Other", "font")
+        Config.FONTCOLOR = Config.config.get("Other", "font_color")
+        Config.is_local = Config.config.get("Other", "is_localOCR")
+        Config.show_text_dely = Config.config.get("Other", "show_text_dely")
+        Config.select_area_key = Config.config.get("Other", "select_area_key")
+        Config.translate_key = Config.config.get("Other", "translate_key")
+
+        ##百度智能云 文字识别##
+        Config.APP_ID = Config.config.get("BaiduOCR", "appid")
+        Config.API_KEY = Config.config.get("BaiduOCR", "appkey")
+        Config.SECRET_KEY = Config.config.get("BaiduOCR", "secretkey")
+        Config.client = AipOcr(Config.APP_ID, Config.API_KEY, Config.SECRET_KEY)
+
+        ##百度翻译开放平台##
+        Config.appid = Config.config.get("BaiduTranslate", "appid")
+        Config.appkey = Config.config.get("BaiduTranslate", "appkey")
+        # For list of language codes, please refer to `https://api.fanyi.baidu.com/doc/21`
+        Config.from_lang = Config.config.get("BaiduTranslate", "from_lang")
+        Config.to_lang = Config.config.get("BaiduTranslate", "to_lang")
+        Config.trans_url = "https://api.fanyi.baidu.com/api/trans/vip/translate"
+        ####################参数####################
+
+    @staticmethod
+    def save_config():
+        Config.config.set("Other", "font", Config.FONT)
+        Config.config.set("Other", "font_color", Config.FONTCOLOR)
+        Config.config.set("Other", "is_localOCR", Config.is_local)
+        Config.config.set("Other", "show_text_dely", Config.show_text_dely)
+        Config.config.set("Other", "select_area_key", Config.select_area_key)
+        Config.config.set("Other", "translate_key", Config.translate_key)
+
+        ##百度智能云 文字识别##
+        Config.config.set("BaiduOCR", "appid", Config.APP_ID)
+        Config.config.set("BaiduOCR", "appkey", Config.API_KEY)
+        Config.config.set("BaiduOCR", "secretkey", Config.SECRET_KEY)
+
+        ##百度翻译开放平台##
+        Config.config.set("BaiduTranslate", "appid", Config.appid)
+        Config.config.set("BaiduTranslate", "appkey", Config.appkey)
+        with open(Config.MATH_PATH + r"\config.ini", "w", encoding="utf-8-sig") as f:
+            Config.config.write(f)
+
+    @staticmethod
+    def set_text_dely(time):
+        Config.show_text_dely = str(time)
+
+    @staticmethod
+    def set_key_fy(key):
+        Config.translate_key = str(key)
+
+    @staticmethod
+    def set_key_grab(key):
+        Config.select_area_key = str(key)
+
+    @staticmethod
+    def set_font_color(color):
+        Config.FONTCOLOR = str(color)
+
+    @staticmethod
+    def set_font_size(size):
+        fontsetting = Config.FONT.split(" ")
+        fontsetting[1] = str(size)
+        Config.FONT = " ".join(fontsetting)
+
+    @staticmethod
+    def set_local_ocr(is_local):
+        Config.is_local = str(is_local)
+
+    @staticmethod
+    def set_baidu_ocr(APP_ID, API_KEY, SECRET_KEY):
+        Config.APP_ID = APP_ID
+        Config.API_KEY = API_KEY
+        Config.SECRET_KEY = SECRET_KEY
+        Config.client = AipOcr(APP_ID, API_KEY, SECRET_KEY)
+
+    @staticmethod
+    def set_baidu_translate(appid, appkey):
+        Config.appid = appid
+        Config.appkey = appkey
 
 
 def cal_bgcolor():
@@ -69,30 +170,30 @@ def debug_print(s, *args):
 
 class TranslateImage:
     def __init__(self, que, result="", box_area=""):
+        # from lib.paddleocr.paddleocr import PaddleOCR
+
         from paddleocr import PaddleOCR
 
         self.que = que
         self.result = result
         self.box_area = box_area
         self.accurate = True
-        self.is_local = Config.is_local == "1"
-        self._temp_path = r"\_temp.png"
+        self._temp_path = r"\inference_model\_temp.png"
 
-        if self.is_local:
-            self._paddle = PaddleOCR(  # paddleocr --help
-                use_angle_cls=False,
-                lang="japan",
-                det_model_dir=f"{Config.MATH_PATH}/inference_model/ch_ppocr_server_v2.0_det_infer/",
-                rec_model_dir=f"{Config.MATH_PATH}/inference_model/japan_mobile_v2.0_rec_infer",
-                rec_char_dict_path=f"{Config.MATH_PATH}/inference_model/japan_dict.txt",
-                use_gpu=False,
-                use_tensorrt=True,
-                use_space_char=True,
-                det_db_unclip_ratio=2.5,
-                det_db_thresh=0.9,
-                max_text_length=256,
-                show_log=False,
-            )
+        self._paddle = PaddleOCR(  # paddleocr --help
+            use_angle_cls=False,
+            lang="japan",
+            det_model_dir=f"{Config.MATH_PATH}/inference_model/ch_ppocr_server_v2.0_det_infer/",
+            rec_model_dir=f"{Config.MATH_PATH}/inference_model/japan_mobile_v2.0_rec_infer",
+            rec_char_dict_path=f"{Config.MATH_PATH}/inference_model/japan_dict.txt",
+            use_gpu=False,
+            use_tensorrt=True,
+            use_space_char=True,
+            det_db_unclip_ratio=2.5,
+            det_db_thresh=0.9,
+            max_text_length=256,
+            show_log=True,
+        )
 
     def baidu_api_ocr(self, img_bytes):
         # ocr
@@ -130,7 +231,7 @@ class TranslateImage:
         for box in boxes:
             result.append(box[1][0])
         debug_print("OCR:Paddle")
-        return "\n".join(result)
+        return "".join(result)
 
     def baidu_api_translate(self, query):
         salt = randint(32768, 65536)
@@ -158,7 +259,7 @@ class TranslateImage:
 
     def baidu_api_run(self, img_bytes):
         is_text_exist = True
-        if self.is_local:
+        if Config.is_local == "1":
             query = self.paddle_ocr()
         else:
             query = self.baidu_api_ocr(img_bytes)
@@ -175,7 +276,7 @@ class TranslateImage:
         time = 0
         while not is_text_exist:
             img = self.captureImage()
-            if self.is_local:
+            if Config.is_local == "1":
                 img.save(Config.MATH_PATH + self._temp_path)
             if img is not None:
                 img_bytes = BytesIO()
@@ -194,16 +295,23 @@ class TranslateImage:
 
 
 class HotKey(Process):  # 键盘热键监听
-    def __init__(self, que):
+    def __init__(self, que, que_setting):
         super().__init__()
         self.que = que
+        self.que_setting = que_setting
         self.keylist = []
         self.ss = None
+        self.translate_key = Config.translate_key
+        self.select_area_key = Config.select_area_key
 
     def grab(self):
         self.ss = ScreenShoot()
         if self.ss.box_area != None:
             self.que.put(f"box_area${self.ss.box_area}$new")  # 发送box_area
+
+    def reset_key(self, key1, key2):
+        self.translate_key = key1
+        self.select_area_key = key2
 
     def translate(self):
         self.que.put("translate")
@@ -224,10 +332,13 @@ class HotKey(Process):  # 键盘热键监听
 
         # print('Transition', event.Transition)  # 判断转换状态
         # print('---')
+        if not self.que_setting.empty():
+            setting = self.que_setting.get().split("$")
+            self.reset_key(setting[0], setting[1])
 
-        if event.Key == Config.select_area_key:
+        if event.Key == self.select_area_key:
             self.grab()
-        elif event.Key == Config.translate_key:
+        elif event.Key == self.translate_key:
             self.translate()
         elif event.Key == "Return":
             self.translate()
@@ -258,12 +369,13 @@ class HotKey(Process):  # 键盘热键监听
         PumpMessages()
 
 
-class ResizingCanvas(Canvas):  # 大小随窗口缩放的Canvas
-    def __init__(self, parent, que=None, **kwargs):
+class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
+    def __init__(self, parent, que=None, que_setting=None, **kwargs):
         super().__init__(parent, **kwargs)
 
         self.root = parent
         self.que = que
+        self.que_setting = que_setting
         self.bind("<Configure>", self.on_resize)
         self.height = self.winfo_reqheight()
         self.width = self.winfo_reqwidth()
@@ -278,6 +390,7 @@ class ResizingCanvas(Canvas):  # 大小随窗口缩放的Canvas
         self._rect_height = 30
         self._rect_gap = 2
         self._bgcolor = cal_bgcolor()
+        self._on_setting = False
         if self.root.attributes("-alpha") < 0.5:
             self._is_area = True
         else:
@@ -315,7 +428,7 @@ class ResizingCanvas(Canvas):  # 大小随窗口缩放的Canvas
             tags="rect_move",
         )  # 用于触发鼠标事件的矩形
 
-        self.rect_close_id = self.create_rectangle(
+        self.rect_menu_id = self.create_rectangle(
             0,
             0,
             0,
@@ -323,15 +436,171 @@ class ResizingCanvas(Canvas):  # 大小随窗口缩放的Canvas
             activeoutline="red",
             activefill="blue",
             fill=self._bgcolor,
-            tags="rect_close",
+            tags="rect_menu",
         )  # 用于触发鼠标事件的矩形
+
+        if not self._is_area:
+            self.popup_menu = Menu(self, tearoff=0)
+            self.popup_menu.add_command(label="清空", command=self.menu_clear)
+            self.popup_menu.add_command(label="设置", command=self.menu_setting)
+            self.popup_menu.add_command(label="退出", command=self.menu_close)
+            self.tag_bind("rect_menu", "<Button-1>", self.on_mouse_down_menu)
+        else:
+            self.tag_bind("rect_menu", "<Button-1>", self.menu_close)
 
         self.tag_bind("rect_size", "<Button-1>", self.on_mouse_down_size)
         self.tag_bind("rect_move", "<Button-1>", self.on_mouse_down_move)
         self.tag_bind("rect_size", "<Motion>", self.on_mouse_motion_size)
         self.tag_bind("rect_move", "<Motion>", self.on_mouse_motion_move)
-        self.tag_bind("rect_close", "<Button-1>", self.on_mouse_down_close)
         self.bind("<ButtonRelease-1>", self.on_mouse_release)
+
+    def menu_clear(self):
+        self.que.put("")
+
+    def menu_setting(self):
+        if self._on_setting:
+            return
+        self._on_setting = True
+        top = Toplevel(self.root)
+        top.overrideredirect(True)
+        top.attributes("-topmost", 1)
+
+        def set_pos():
+            sleep(0.1)
+            size = top.geometry(None).split("+")[0]
+            if size != "1x1":
+                sizeint = size.split("x")
+                top.geometry(
+                    f"{size}+{(self.root.winfo_screenwidth()- int(sizeint[0]))//2}+{(self.root.winfo_screenheight()- int(sizeint[1]))//2}"
+                )
+
+        def choose_color():
+            choose = colorchooser.askcolor()
+            Config.set_font_color(choose[1])
+            b1.config(bg=choose[1])
+            bgcolor = cal_bgcolor()
+            self.root.attributes("-transparentcolor", bgcolor)
+            self.config(bg=bgcolor)
+            self.itemconfig(self.rect_menu_id, fill=bgcolor)
+            self.itemconfig(self.rect_move_id, fill=bgcolor)
+            self.itemconfig(self.rect_id, fill=bgcolor)
+
+        def choose_font(value):
+            Config.set_font_size(t1.get())
+            self.itemconfig(self.text_id, font=Config.FONT)
+
+        def choose_local_ocr():
+            if Config.is_local == "1":
+                Config.set_local_ocr("0")
+            else:
+                Config.set_local_ocr("1")
+
+        def confirm_setting():
+            Config.set_baidu_ocr(t_ocr1.get(), t_ocr2.get(), t_ocr3.get())
+            Config.set_baidu_translate(t_fy1.get(), t_fy2.get())
+            Config.set_text_dely(t_dely.get())
+            Config.set_key_fy(t_key1.get())
+            Config.set_key_grab(t_key2.get())
+            Config.save_config()
+            while not self.que_setting.empty():
+                self.que_setting.get()
+            self.que_setting.put(f"{Config.translate_key}${Config.select_area_key}")
+            self._on_setting = False
+            top.destroy()
+
+        def get_key_values():
+            keys = []
+            for i in range(ord("A"), ord("Z") + 1):
+                keys.append(chr(i))
+            for i in range(1, 13):
+                keys.append(f"F{i}")
+            return tuple(keys)
+
+        b1 = Button(top, text="字体颜色", bg=Config.FONTCOLOR, command=choose_color)
+        b1.grid(row=0, column=0)
+        l1 = Label(top, text="字体大小")
+        l1.grid(row=0, column=1, sticky="e")
+        t1 = ttk.Combobox(top, width=5)
+        t1.insert(0, Config.FONT.split(" ")[1])
+        t1["values"] = (10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40)
+        t1["state"] = "readonly"
+        t1.grid(row=0, column=2, sticky="w")
+        t1.bind("<<ComboboxSelected>>", choose_font)
+
+        l_key1 = Label(top, text="翻译键")
+        l_key1.grid(row=1, column=0, sticky="e")
+        t_key1 = ttk.Combobox(top, width=5)
+        t_key1.insert(0, Config.translate_key)
+        t_key1["values"] = get_key_values()
+        t_key1["state"] = "readonly"
+        t_key1.grid(row=1, column=1, sticky="w")
+
+        l_key2 = Label(top, text="选择键")
+        l_key2.grid(row=1, column=2, sticky="e")
+        t_key2 = ttk.Combobox(top, width=5)
+        t_key2.insert(0, Config.select_area_key)
+        t_key2["values"] = get_key_values()
+        t_key2["state"] = "readonly"
+        t_key2.grid(row=1, column=3, sticky="w")
+
+        b2 = Checkbutton(top, text="开启本地OCR", command=choose_local_ocr)
+        if Config.is_local == "1":
+            b2.select()
+        b2.grid(row=2, column=0)
+        l_dely = Label(top, text="文字显示延迟(秒)")
+        l_dely.grid(row=2, column=1, sticky="e")
+        t_dely = Entry(top, width=5)
+        t_dely.insert(0, Config.show_text_dely)
+        t_dely.grid(row=2, column=2, sticky="w")
+
+        l_ocr0 = LinkLabel(
+            top, link="https://cloud.baidu.com/product/ocr_general", text="百度OCR"
+        )
+        l_ocr0.grid(row=3, column=0)
+        l_ocr1 = Label(top, text="APP_ID")
+        l_ocr1.grid(row=4, column=0)
+        l_ocr2 = Label(top, text="API_KEY")
+        l_ocr2.grid(row=5, column=0)
+        l_ocr3 = Label(top, text="SECRET_KEY")
+        l_ocr3.grid(row=6, column=0)
+
+        t_ocr1 = Entry(top, width=20)
+        t_ocr1.grid(row=4, column=1, columnspan=2)
+        t_ocr2 = Entry(top, width=20)
+        t_ocr2.grid(row=5, column=1, columnspan=2)
+        t_ocr3 = Entry(top, width=20)
+        t_ocr3.grid(row=6, column=1, columnspan=2)
+
+        t_ocr1.insert(0, Config.APP_ID)
+        t_ocr2.insert(0, Config.API_KEY)
+        t_ocr3.insert(0, Config.SECRET_KEY)
+
+        l_fy0 = LinkLabel(top, link="https://api.fanyi.baidu.com", text="百度翻译")
+        l_fy0.grid(row=7, column=0)
+        l_fy1 = Label(top, text="APP_ID")
+        l_fy1.grid(row=8, column=0)
+        l_fy1 = Label(top, text="API_KEY")
+        l_fy1.grid(row=9, column=0)
+
+        t_fy1 = Entry(top, width=20)
+        t_fy1.grid(row=8, column=1, columnspan=2)
+        t_fy2 = Entry(top, width=20)
+        t_fy2.grid(row=9, column=1, columnspan=2)
+
+        t_fy1.insert(0, Config.appid)
+        t_fy2.insert(0, Config.appkey)
+
+        b_end = Button(top, text="ok", command=confirm_setting)
+        b_end.grid(row=10, column=1)
+        Thread(target=set_pos).start()
+
+    def menu_close(self, event=None):
+        self.delete(self.rect_id)
+        self.delete(self.rect_move_id)
+        self.delete(self.rect_menu_id)
+        if self._is_area:
+            self.delete(self.rect_border_id)
+        self.root.quit()
 
     def get_root_rect(self):
         geo = self.root.geometry(None)
@@ -349,13 +618,10 @@ class ResizingCanvas(Canvas):  # 大小随窗口缩放的Canvas
     def on_mouse_down_move(self, event):
         self._moving = True
 
-    def on_mouse_down_close(self, event):
-        self.delete(self.rect_id)
-        self.delete(self.rect_move_id)
-        self.delete(self.rect_close_id)
-        if self._is_area:
-            self.delete(self.rect_border_id)
-        self.root.quit()
+    def on_mouse_down_menu(self, event):
+        self.popup_menu.tk_popup(
+            event.x_root + self._rect_width, event.y_root + self._rect_height, 0
+        )
 
     def on_mouse_motion_size(self, event):
         if self._resizing:
@@ -437,7 +703,7 @@ class ResizingCanvas(Canvas):  # 大小随窗口缩放的Canvas
         )
 
         self.coords(
-            self.rect_close_id,
+            self.rect_menu_id,
             self.width - 3 * self._rect_width - 2 * self._rect_gap,
             self.height - self._rect_height,
             self.width - 2 * self._rect_width - 2 * self._rect_gap,
@@ -518,7 +784,7 @@ class Areawin(Process):
         y2 = int(self.box[3])
         self.area_root.geometry(f"{x2-x1}x{y2-y1}+{x1}+{y1}")
         self.area_root.overrideredirect(True)
-        box_canvas = ResizingCanvas(
+        box_canvas = MainCanvas(
             self.area_root,
             que=self.que,
             width=x2 - x1,
@@ -530,9 +796,10 @@ class Areawin(Process):
 
 
 class Tkwin(Thread):
-    def __init__(self, que):
+    def __init__(self, que, que_setting):
         super().__init__()
         self.que = que
+        self.que_setting = que_setting
         self.transimg = TranslateImage(self.que)
         self.rect_id = -1
 
@@ -544,7 +811,7 @@ class Tkwin(Thread):
     def on_mouse_wheel(self, event):  # 鼠标滚轮事件
         Thread(target=self.change_rect_color).start()
         debug_print("on_mouse_wheel")
-        sleep(Config.show_text_dely)
+        sleep(float(Config.show_text_dely))
         self.que.put("translate")
 
     def run(self):
@@ -560,7 +827,14 @@ class Tkwin(Thread):
         self.root.attributes("-topmost", 1)
         # self.root.attributes("-toolwindow", 1)
         self.root.overrideredirect(True)
-        self.canvas = ResizingCanvas(self.root, width=700, height=150, bg=bgcolor)
+        self.canvas = MainCanvas(
+            self.root,
+            que=self.que,
+            que_setting=self.que_setting,
+            width=700,
+            height=150,
+            bg=bgcolor,
+        )
         self.canvas.addtag_all("resizable")
         self.canvas.pack()
 
@@ -582,22 +856,19 @@ class Tkwin(Thread):
         msgloop.terminate()
 
 
+global p2_hotkey
 if __name__ == "__main__":
     from multiprocessing import Queue, freeze_support, set_start_method
-    import traceback
 
     freeze_support()  # Windows使用Pyinstaller对多进程打包必须 https://github.com/pyinstaller/pyinstaller/wiki/Recipe-Multiprocessing
     set_start_method("spawn")
     debug_print("debug:", Config.debug)
+    que = Queue()  # 通信队列
+    que_setting = Queue()
+    p1 = Tkwin(que, que_setting)  # GUI
+    p1.start()
+    p2_hotkey = HotKey(que, que_setting)  # 键盘热键监听（功能入口）
+    p2_hotkey.start()
 
-    try:
-        que = Queue()  # 通信队列
-        p1 = Tkwin(que)  # GUI
-        p1.start()
-        p2 = HotKey(que)  # 键盘热键监听（功能入口）
-        p2.start()
-    except:
-        traceback.print_exc()
-        input("")
     p1.join()
-    p2.terminate()
+    p2_hotkey.terminate()
