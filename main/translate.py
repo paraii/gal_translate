@@ -3,9 +3,7 @@ __author__ = "paraii"
 
 from configparser import ConfigParser
 from hashlib import md5
-from io import BytesIO
 from multiprocessing import Process
-from operator import itemgetter
 from random import randint
 from threading import Thread, Event
 from time import sleep
@@ -19,12 +17,11 @@ from tkinter import (
     colorchooser,
     Button,
     Entry,
-    font,
     ttk,
 )
-from turtle import color
 from aip import AipOcr
-from PIL import ImageGrab
+from mss import mss  # https://python-mss.readthedocs.io/examples.html
+from mss.tools import to_png
 from requests import post
 from gui_utils.screenshoot import ScreenShoot
 from gui_utils.link_label import LinkLabel
@@ -200,7 +197,7 @@ class TranslateImage:
         options = {}
         options["language_type"] = "JAP"
         if self.accurate:
-            res = Config.client.basicAccurate(img_bytes.getvalue(), options)
+            res = Config.client.basicAccurate(img_bytes, options)
             if "error_code" in res and res["error_code"] == 18:
                 return False
             elif "error_code" in res and res["error_code"] == 17:
@@ -209,7 +206,7 @@ class TranslateImage:
                 res = res["words_result"]
                 debug_print("OCR:高精度")
         else:
-            res = Config.client.basicGeneral(img_bytes.getvalue(), options)
+            res = Config.client.basicGeneral(img_bytes, options)
             if "error_code" in res and res["error_code"] == 18:
                 return False
             elif "error_code" in res and res["error_code"] == 17:
@@ -277,10 +274,12 @@ class TranslateImage:
         while not is_text_exist:
             img = self.captureImage()
             if Config.is_local == "1":
-                img.save(Config.MATH_PATH + self._temp_path)
+                to_png(img.rgb, img.size, output=Config.MATH_PATH + self._temp_path)
+                # img.save(Config.MATH_PATH + self._temp_path, format="PNG")
             if img is not None:
-                img_bytes = BytesIO()
-                img.save(img_bytes, format="PNG")
+                # img_bytes = BytesIO()
+                # img.save(img_bytes, format="PNG")
+                img_bytes = to_png(img.rgb, img.size)
                 is_text_exist = self.baidu_api_run(img_bytes)
                 if not is_text_exist:
                     sleep(0.5)
@@ -291,7 +290,11 @@ class TranslateImage:
         self.que.put(self.result)  # 发送翻译结果
 
     def captureImage(self):
-        return ImageGrab.grab(self.box_area)
+        with mss() as sct:
+            sct.compression_level = 0
+            bbox = [int(x) for x in self.box_area]
+            img = sct.grab(tuple(bbox))
+        return img
 
 
 class HotKey(Process):  # 键盘热键监听
