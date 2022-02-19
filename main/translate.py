@@ -220,7 +220,7 @@ class TranslateImage:
         for wrd in res:
             words.append(wrd["words"])
         query = "".join(words)
-        return query
+        return str(query)
 
     def paddle_ocr(self):
         boxes = self._paddle.ocr(Config.MATH_PATH + self._temp_path, cls=False)
@@ -251,8 +251,12 @@ class TranslateImage:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         res = r.json()
-        self.result = res["trans_result"][0]["dst"]
-        debug_print(f"translate result: {self.result}")
+        if "error_code" in dict.keys():
+            debug_print(res)
+            self.result = f"百度翻译错误：{res}"
+        else:
+            self.result = res["trans_result"][0]["dst"]
+            debug_print(f"translate result: {self.result}")
 
     def baidu_api_run(self, img_bytes):
         is_text_exist = True

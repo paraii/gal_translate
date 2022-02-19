@@ -30,7 +30,7 @@ translate_key = Z
 ```
 注册百度服务后在管理控制台创建应用可以得到密钥，复制到配置文件的对应位置即可：  
 百度OCR：https://cloud.baidu.com/product/ocr_general  
-百度翻译：https://api.fanyi.baidu.com  
+百度翻译：https://api.fanyi.baidu.com  （**注册后创建通用翻译服务**）  
 
 两者均可领取免费额度，其中百度翻译服务额度较多。  
 
