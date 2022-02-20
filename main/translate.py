@@ -33,6 +33,7 @@ class Config:
 
     MATH_PATH = path.dirname(path.realpath(argv[0])).split("\\")
     MATH_PATH = "\\".join(MATH_PATH[0:-1])
+    print(f"{MATH_PATH}\\ppp")
     debug = True
 
     config = ConfigParser()
