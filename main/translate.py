@@ -25,6 +25,7 @@ from mss.tools import to_png
 from requests import post
 from gui_utils.screenshoot import ScreenShoot
 from gui_utils.link_label import LinkLabel
+import re
 
 
 class Config:
@@ -33,9 +34,9 @@ class Config:
 
     MATH_PATH = path.dirname(path.realpath(argv[0])).split("\\")
     MATH_PATH = "\\".join(MATH_PATH[0:-1])
-    print(f"{MATH_PATH}\\ppp")
     debug = True
-
+    if re.search("[\u4e00-\u9fa5]", MATH_PATH) != None:
+        input(f"文件路径不能含有中文！当前路径为{MATH_PATH}\n按任意键退出...")
     config = ConfigParser()
     config.read(MATH_PATH + r"\config.ini", encoding="utf-8-sig")
 
@@ -197,27 +198,32 @@ class TranslateImage:
         # ocr
         options = {}
         options["language_type"] = "JAP"
+
         if self.accurate:
             res = Config.client.basicAccurate(img_bytes, options)
             if "error_code" in res and res["error_code"] == 18:
-                return False
+                return "ocr error_code 18 超出每秒翻译限制"
             elif "error_code" in res and res["error_code"] == 17:
                 self.accurate = False
+                return ""
             else:
                 res = res["words_result"]
                 debug_print("OCR:高精度")
         else:
             res = Config.client.basicGeneral(img_bytes, options)
             if "error_code" in res and res["error_code"] == 18:
-                return False
+                return "ocr error_code 18 超出每秒翻译限制"
             elif "error_code" in res and res["error_code"] == 17:
                 self.result = "※今日OCR额度已用完"
-                return True
+                return ""
             else:
                 res = res["words_result"]
                 debug_print("OCR:标准精度")
 
         words = []
+        # print("error_code" in res)
+        # print(res["error_code"])
+        # print(res["error_code"] == 17)
         for wrd in res:
             words.append(wrd["words"])
         query = "".join(words)
@@ -252,7 +258,7 @@ class TranslateImage:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         res = r.json()
-        if "error_code" in dict.keys():
+        if "error_code" in res.keys():
             debug_print(res)
             self.result = f"百度翻译错误：{res}"
         else:
@@ -349,9 +355,9 @@ class HotKey(Process):  # 键盘热键监听
         elif event.Key == self.translate_key:
             self.translate()
         elif event.Key == "Return":
+            sleep(float(Config.show_text_dely))
             self.translate()
         else:
-
             self.keylist.append(event.Key)
 
         # 三键组合
