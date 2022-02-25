@@ -1,4 +1,5 @@
 __author__ = "paraii"
+__version__ = "v2.3"
 # import traceback
 
 from configparser import ConfigParser
@@ -19,13 +20,15 @@ from tkinter import (
     Entry,
     ttk,
 )
+from webbrowser import open as webopen
 from aip import AipOcr
 from mss import mss  # https://python-mss.readthedocs.io/examples.html
 from mss.tools import to_png
-from requests import post
+from requests import post, get
 from gui_utils.screenshoot import ScreenShoot
 from gui_utils.link_label import LinkLabel
 import re
+import json
 
 
 class Config:
@@ -44,6 +47,7 @@ class Config:
     FONT = config.get("Other", "font")
     FONTCOLOR = config.get("Other", "font_color")
     is_local = config.get("Other", "is_localOCR")
+    is_show_bg = config.get("Other", "is_show_bg")
     show_text_dely = config.get("Other", "show_text_dely")
     select_area_key = config.get("Other", "select_area_key")
     translate_key = config.get("Other", "translate_key")
@@ -73,6 +77,7 @@ class Config:
         Config.FONT = Config.config.get("Other", "font")
         Config.FONTCOLOR = Config.config.get("Other", "font_color")
         Config.is_local = Config.config.get("Other", "is_localOCR")
+        Config.is_show_bg = Config.config.get("Other", "is_show_bg")
         Config.show_text_dely = Config.config.get("Other", "show_text_dely")
         Config.select_area_key = Config.config.get("Other", "select_area_key")
         Config.translate_key = Config.config.get("Other", "translate_key")
@@ -97,6 +102,7 @@ class Config:
         Config.config.set("Other", "font", Config.FONT)
         Config.config.set("Other", "font_color", Config.FONTCOLOR)
         Config.config.set("Other", "is_localOCR", Config.is_local)
+        Config.config.set("Other", "is_show_bg", Config.is_show_bg)
         Config.config.set("Other", "show_text_dely", Config.show_text_dely)
         Config.config.set("Other", "select_area_key", Config.select_area_key)
         Config.config.set("Other", "translate_key", Config.translate_key)
@@ -111,6 +117,10 @@ class Config:
         Config.config.set("BaiduTranslate", "appkey", Config.appkey)
         with open(Config.MATH_PATH + r"\config.ini", "w", encoding="utf-8-sig") as f:
             Config.config.write(f)
+
+    @staticmethod
+    def set_show_bg(is_show):
+        Config.is_show_bg = str(is_show)
 
     @staticmethod
     def set_text_dely(time):
@@ -309,10 +319,11 @@ class TranslateImage:
 
 
 class HotKey(Process):  # 键盘热键监听
-    def __init__(self, que, que_setting):
+    def __init__(self, que, que_setting, array):
         super().__init__()
         self.que = que
         self.que_setting = que_setting
+        self.array = array
         self.keylist = []
         self.ss = None
         self.translate_key = Config.translate_key
@@ -373,23 +384,31 @@ class HotKey(Process):  # 键盘热键监听
             self.keylist.clear()
         return True
 
+    def OnMouseMove(self, event):
+        self.array[0] = int(event.Position[0])
+        self.array[1] = int(event.Position[1])
+        return True
+
     def run(self):
         from PyHook3 import HookManager
         from pythoncom import PumpMessages
 
         hm = HookManager()
         hm.KeyDown = self.OnKeyboardEvent
+        hm.MouseMove = self.OnMouseMove
         hm.HookKeyboard()
+        hm.HookMouse()
         PumpMessages()
 
 
 class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
-    def __init__(self, parent, que=None, que_setting=None, **kwargs):
+    def __init__(self, parent, que=None, que_setting=None, array=None, **kwargs):
         super().__init__(parent, **kwargs)
 
         self.root = parent
         self.que = que
         self.que_setting = que_setting
+        self.array = array
         self.bind("<Configure>", self.on_resize)
         self.height = self.winfo_reqheight()
         self.width = self.winfo_reqwidth()
@@ -418,6 +437,10 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
                 outline="red",
                 dash=(5, 1),
                 fill=self._bgcolor,
+            )
+        else:
+            self.rect_bg = self.create_rectangle(
+                0, 0, 0, 0, fill=self._bgcolor, tags="rect_bg"
             )
 
         self.rect_id = self.create_rectangle(
@@ -457,8 +480,11 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
             self.popup_menu = Menu(self, tearoff=0)
             self.popup_menu.add_command(label="清空", command=self.menu_clear)
             self.popup_menu.add_command(label="设置", command=self.menu_setting)
+            self.popup_menu.add_command(label="更新", command=self.open_github)
             self.popup_menu.add_command(label="退出", command=self.menu_close)
             self.tag_bind("rect_menu", "<Button-1>", self.on_mouse_down_menu)
+            self.check_mouse = True
+            Thread(target=self.check_mouse_position).start()
         else:
             self.tag_bind("rect_menu", "<Button-1>", self.menu_close)
 
@@ -467,6 +493,39 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
         self.tag_bind("rect_size", "<Motion>", self.on_mouse_motion_size)
         self.tag_bind("rect_move", "<Motion>", self.on_mouse_motion_move)
         self.bind("<ButtonRelease-1>", self.on_mouse_release)
+
+    def open_github(self):
+        tags = get(
+            "https://api.github.com/repos/paraii/gal_translate/tags"
+        )  # https://api.github.com/repos/paraii/gal_translate
+        tags = json.loads(tags.text)
+        v = tags[0]["name"]
+        if v != __version__:
+            webopen(f"https://github.com/paraii/gal_translate/releases/tag/{v}")
+        else:
+            self.que.put("已是最新版本")
+
+    def check_mouse_position(self):
+        x, y = 0, 0
+        while self.check_mouse:
+            if Config.is_show_bg == "1" and self.itemcget(self.text_id, "text") != "":
+                rect = self.get_root_rect()
+                x = self.array[0]
+                y = self.array[1]
+                if (
+                    x > rect[0] and x < rect[2] and y > rect[1] and y < rect[3]
+                ) and not (
+                    x > rect[2] - 3 * self._rect_width - 2 * self._rect_gap
+                    and x < rect[2]
+                    and y > rect[3] - self._rect_width
+                    and y < rect[3]
+                ):
+                    self.itemconfig(self.rect_bg, fill=self._bgcolor)
+                else:
+                    self.itemconfig(self.rect_bg, fill="#505050")
+            elif self.itemcget(self.rect_bg, "fill") == "#505050":
+                self.itemconfig(self.rect_bg, fill=self._bgcolor)
+            sleep(0.1)
 
     def menu_clear(self):
         self.que.put("")
@@ -493,6 +552,7 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
             Config.set_font_color(choose[1])
             b1.config(bg=choose[1])
             bgcolor = cal_bgcolor()
+            self._bgcolor = bgcolor
             self.root.attributes("-transparentcolor", bgcolor)
             self.config(bg=bgcolor)
             self.itemconfig(self.rect_menu_id, fill=bgcolor)
@@ -508,6 +568,12 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
                 Config.set_local_ocr("0")
             else:
                 Config.set_local_ocr("1")
+
+        def choose_show_bg():
+            if Config.is_show_bg == "1":
+                Config.set_show_bg("0")
+            else:
+                Config.set_show_bg("1")
 
         def confirm_setting():
             Config.set_baidu_ocr(t_ocr1.get(), t_ocr2.get(), t_ocr3.get())
@@ -540,6 +606,10 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
         t1["state"] = "readonly"
         t1.grid(row=0, column=2, sticky="w")
         t1.bind("<<ComboboxSelected>>", choose_font)
+        b_bg = Checkbutton(top, text="开启衬色", command=choose_show_bg)
+        if Config.is_show_bg == "1":
+            b_bg.select()
+        b_bg.grid(row=2, column=3)
 
         l_key1 = Label(top, text="翻译键")
         l_key1.grid(row=1, column=0, sticky="e")
@@ -578,12 +648,12 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
         l_ocr3 = Label(top, text="SECRET_KEY")
         l_ocr3.grid(row=6, column=0)
 
-        t_ocr1 = Entry(top, width=20)
-        t_ocr1.grid(row=4, column=1, columnspan=2)
-        t_ocr2 = Entry(top, width=20)
-        t_ocr2.grid(row=5, column=1, columnspan=2)
-        t_ocr3 = Entry(top, width=20)
-        t_ocr3.grid(row=6, column=1, columnspan=2)
+        t_ocr1 = Entry(top, width=30)
+        t_ocr1.grid(row=4, column=1, columnspan=3, sticky="w")
+        t_ocr2 = Entry(top, width=30)
+        t_ocr2.grid(row=5, column=1, columnspan=3, sticky="w")
+        t_ocr3 = Entry(top, width=30)
+        t_ocr3.grid(row=6, column=1, columnspan=3, sticky="w")
 
         t_ocr1.insert(0, Config.APP_ID)
         t_ocr2.insert(0, Config.API_KEY)
@@ -596,10 +666,10 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
         l_fy1 = Label(top, text="API_KEY")
         l_fy1.grid(row=9, column=0)
 
-        t_fy1 = Entry(top, width=20)
-        t_fy1.grid(row=8, column=1, columnspan=2)
-        t_fy2 = Entry(top, width=20)
-        t_fy2.grid(row=9, column=1, columnspan=2)
+        t_fy1 = Entry(top, width=30)
+        t_fy1.grid(row=8, column=1, columnspan=3, sticky="w")
+        t_fy2 = Entry(top, width=30)
+        t_fy2.grid(row=9, column=1, columnspan=3, sticky="w")
 
         t_fy1.insert(0, Config.appid)
         t_fy2.insert(0, Config.appkey)
@@ -614,6 +684,8 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
         self.delete(self.rect_menu_id)
         if self._is_area:
             self.delete(self.rect_border_id)
+        else:
+            self.check_mouse = False
         self.root.quit()
 
     def get_root_rect(self):
@@ -698,6 +770,14 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
                 5,
                 self.width - 5,
                 self.height - 5,
+            )
+        else:
+            self.coords(
+                self.rect_bg,
+                0,
+                0,
+                self.width,
+                self.height,
             )
 
         self.coords(
@@ -810,10 +890,11 @@ class Areawin(Process):
 
 
 class Tkwin(Thread):
-    def __init__(self, que, que_setting):
+    def __init__(self, que, que_setting, array):
         super().__init__()
         self.que = que
         self.que_setting = que_setting
+        self.array = array
         self.transimg = TranslateImage(self.que)
         self.rect_id = -1
 
@@ -832,7 +913,6 @@ class Tkwin(Thread):
         bgcolor = cal_bgcolor()
 
         self.root = Tk()
-        self.root.title("日->中")
         self.root.geometry(
             f"700x60+{(self.root.winfo_screenwidth()- 700)//2}+{(self.root.winfo_screenheight() - 60)//2}"
         )
@@ -845,8 +925,7 @@ class Tkwin(Thread):
             self.root,
             que=self.que,
             que_setting=self.que_setting,
-            width=700,
-            height=150,
+            array=self.array,
             bg=bgcolor,
         )
         self.canvas.addtag_all("resizable")
@@ -870,19 +949,27 @@ class Tkwin(Thread):
         msgloop.terminate()
 
 
-global p2_hotkey
 if __name__ == "__main__":
-    from multiprocessing import Queue, freeze_support, set_start_method
+    from multiprocessing import Queue, Array, freeze_support, set_start_method
 
     freeze_support()  # Windows使用Pyinstaller对多进程打包必须 https://github.com/pyinstaller/pyinstaller/wiki/Recipe-Multiprocessing
     set_start_method("spawn")
     debug_print("debug:", Config.debug)
+
     que = Queue()  # 通信队列
     que_setting = Queue()
-    p1 = Tkwin(que, que_setting)  # GUI
+    array = Array("i", [0, 0])
+    p1 = Tkwin(que, que_setting, array)  # GUI
     p1.start()
-    p2_hotkey = HotKey(que, que_setting)  # 键盘热键监听（功能入口）
+    p2_hotkey = HotKey(que, que_setting, array)  # 键盘热键监听（功能入口）
     p2_hotkey.start()
+
+    tags = get(
+        "https://api.github.com/repos/paraii/gal_translate/tags"
+    )  # https://api.github.com/repos/paraii/gal_translate
+    tags = json.loads(tags.text)
+    if tags[0]["name"] != __version__:
+        que.put("有新版本，可打开菜单更新")
 
     p1.join()
     p2_hotkey.terminate()
