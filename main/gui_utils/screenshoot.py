@@ -1,3 +1,7 @@
+from win32.lib.win32con import DESKTOPHORZRES, DESKTOPVERTRES
+from win32.win32api import GetSystemMetrics
+from win32.win32gui import GetDC
+from win32.win32print import GetDeviceCaps
 from tkinter import Canvas, Tk
 
 # 框选按 Space 确认, Esc 退出
@@ -60,6 +64,7 @@ class SelectionArea:
 class ScreenShoot:
     def __init__(self):
         self.win = Tk()
+        self.screen_scale_rate = 1
 
         self.width = self.win.winfo_screenwidth()
         self.height = self.win.winfo_screenheight()
@@ -91,7 +96,25 @@ class ScreenShoot:
         self.canvas.delete("area", "lt_txt", "rb_txt")
         self.win.attributes("-alpha", 0)
 
+    def get_real_resolution(self):
+        # 获取真实的分辨率
+        hDC = GetDC(0)
+        # 横向分辨率
+        w = GetDeviceCaps(hDC, DESKTOPHORZRES)
+        # 纵向分辨率
+        h = GetDeviceCaps(hDC, DESKTOPVERTRES)
+        return w, h
+
+    def get_screen_size(self):
+        # 获取DPI缩放后的分辨率
+        w = GetSystemMetrics(0)
+        h = GetSystemMetrics(1)
+        return w, h
+
     def select_box(self):
+        real_resolution = self.get_real_resolution()
+        screen_size = self.get_screen_size()
+        self.screen_scale_rate = round(real_resolution[0] / screen_size[0], 2)  # DPI缩放
         if self.area.empty():
             return None
         else:

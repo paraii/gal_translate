@@ -1,5 +1,5 @@
 __author__ = "paraii"
-__version__ = "v2.3"
+__version__ = "v2.4"
 # import traceback
 
 from configparser import ConfigParser
@@ -38,8 +38,9 @@ class Config:
     MATH_PATH = path.dirname(path.realpath(argv[0])).split("\\")
     MATH_PATH = "\\".join(MATH_PATH[0:-1])
     debug = True
+    screen_scale_rate = 1
     if re.search("[\u4e00-\u9fa5]", MATH_PATH) != None:
-        input(f"文件路径不能含有中文！当前路径为{MATH_PATH}\n按任意键退出...")
+        input(f"文件路径不能含有中文！当前路径为{MATH_PATH}\n按回车键退出...")
     config = ConfigParser()
     config.read(MATH_PATH + r"\config.ini", encoding="utf-8-sig")
 
@@ -179,8 +180,6 @@ def debug_print(s, *args):
 
 class TranslateImage:
     def __init__(self, que, result="", box_area=""):
-        # from lib.paddleocr.paddleocr import PaddleOCR
-
         from paddleocr import PaddleOCR
 
         self.que = que
@@ -201,11 +200,10 @@ class TranslateImage:
             det_db_unclip_ratio=2.5,
             det_db_thresh=0.9,
             max_text_length=256,
-            show_log=True,
+            show_log=False,
         )
 
     def baidu_api_ocr(self, img_bytes):
-        # ocr
         options = {}
         options["language_type"] = "JAP"
 
@@ -231,9 +229,6 @@ class TranslateImage:
                 debug_print("OCR:标准精度")
 
         words = []
-        # print("error_code" in res)
-        # print(res["error_code"])
-        # print(res["error_code"] == 17)
         for wrd in res:
             words.append(wrd["words"])
         query = "".join(words)
@@ -252,7 +247,6 @@ class TranslateImage:
         sign = md5(
             (Config.appid + query + str(salt) + Config.appkey).encode("utf-8")
         ).hexdigest()
-        # Build request
         payload = {
             "appid": Config.appid,
             "q": query,
@@ -261,7 +255,6 @@ class TranslateImage:
             "salt": salt,
             "sign": sign,
         }
-        # Send request
         r = post(
             Config.trans_url,
             params=payload,
@@ -296,10 +289,7 @@ class TranslateImage:
             img = self.captureImage()
             if Config.is_local == "1":
                 to_png(img.rgb, img.size, output=Config.MATH_PATH + self._temp_path)
-                # img.save(Config.MATH_PATH + self._temp_path, format="PNG")
             if img is not None:
-                # img_bytes = BytesIO()
-                # img.save(img_bytes, format="PNG")
                 img_bytes = to_png(img.rgb, img.size)
                 is_text_exist = self.baidu_api_run(img_bytes)
                 if not is_text_exist:
@@ -313,7 +303,7 @@ class TranslateImage:
     def captureImage(self):
         with mss() as sct:
             sct.compression_level = 0
-            bbox = [int(x) for x in self.box_area]
+            bbox = [int(x * Config.screen_scale_rate) for x in self.box_area]
             img = sct.grab(tuple(bbox))
         return img
 
@@ -328,15 +318,19 @@ class HotKey(Process):  # 键盘热键监听
         self.ss = None
         self.translate_key = Config.translate_key
         self.select_area_key = Config.select_area_key
+        self.show_text_dely = Config.show_text_dely
 
     def grab(self):
         self.ss = ScreenShoot()
+        Config.screen_scale_rate = self.ss.screen_scale_rate
         if self.ss.box_area != None:
             self.que.put(f"box_area${self.ss.box_area}$new")  # 发送box_area
+            self.que.put(f"scale_rate${Config.screen_scale_rate}")
 
-    def reset_key(self, key1, key2):
+    def reset_setting(self, key1, key2, dely):
         self.translate_key = key1
         self.select_area_key = key2
+        self.show_text_dely = dely
 
     def translate(self):
         self.que.put("translate")
@@ -359,14 +353,14 @@ class HotKey(Process):  # 键盘热键监听
         # print('---')
         if not self.que_setting.empty():
             setting = self.que_setting.get().split("$")
-            self.reset_key(setting[0], setting[1])
+            self.reset_setting(setting[0], setting[1], setting[2])
 
         if event.Key == self.select_area_key:
             self.grab()
         elif event.Key == self.translate_key:
             self.translate()
         elif event.Key == "Return":
-            sleep(float(Config.show_text_dely))
+            sleep(float(self.show_text_dely))
             self.translate()
         else:
             self.keylist.append(event.Key)
@@ -584,7 +578,9 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
             Config.save_config()
             while not self.que_setting.empty():
                 self.que_setting.get()
-            self.que_setting.put(f"{Config.translate_key}${Config.select_area_key}")
+            self.que_setting.put(
+                f"{Config.translate_key}${Config.select_area_key}${Config.show_text_dely}"
+            )
             self._on_setting = False
             top.destroy()
 
@@ -745,16 +741,13 @@ class MainCanvas(Canvas):  # 大小随窗口缩放的Canvas
             self.que.put(f"box_area${self.get_root_rect()}$")  # 发送box_area
 
     def on_resize(self, event):
-        # determine the ratio of old width/height to new width/height
         wscale = float(event.width) / self.width
         hscale = float(event.height) / self.height
 
         self.width = event.width
         self.height = event.height
 
-        # resize the canvas
         self.config(width=self.width, height=self.height)
-        # rescale all the objects tagged with the 'resizable' tag
         self.scale("resizable", 0, 0, wscale, hscale)
 
         self.coords(self.text_id, (self.width / 2, self.height / 2))
@@ -840,7 +833,6 @@ class PickMsg(Thread):  # 消息循环
                 if msg != None:
                     msg_arg = msg.split("$")
                     if msg_arg[0] == "box_area":  # 接收box_area
-
                         self.transimg.box_area = [
                             float(x) for x in msg_arg[1][1:-1].split(",")
                         ]
@@ -848,7 +840,8 @@ class PickMsg(Thread):  # 消息循环
 
                         if msg_arg[2] == "new":
                             self.create_area()
-
+                    elif msg_arg[0] == "scale_rate":
+                        Config.screen_scale_rate = float(msg_arg[1])
                     elif msg == "translate":
                         self.translate()
                     else:  # 接收翻译结果
@@ -951,6 +944,16 @@ class Tkwin(Thread):
 
 if __name__ == "__main__":
     from multiprocessing import Queue, Array, freeze_support, set_start_method
+    import ctypes
+
+    # https://stackoverflow.com/questions/44398075/can-dpi-scaling-be-enabled-disabled-programmatically-on-a-per-session-basis
+    # Query DPI Awareness (Windows 10 and 8)
+    awareness = ctypes.c_int()
+    errorCode = ctypes.windll.shcore.GetProcessDpiAwareness(0, ctypes.byref(awareness))
+    # Set DPI Awareness  (Windows 10 and 8)
+    errorCode = ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    # the argument is the awareness level, which can be 0, 1 or 2:
+    # for 1-to-1 pixel control I seem to need it to be non-zero (I'm using level 2)
 
     freeze_support()  # Windows使用Pyinstaller对多进程打包必须 https://github.com/pyinstaller/pyinstaller/wiki/Recipe-Multiprocessing
     set_start_method("spawn")
